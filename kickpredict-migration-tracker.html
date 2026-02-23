@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KickPredict Migration Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="min-h-screen bg-slate-100 text-slate-800">
+    <div class="mx-auto max-w-6xl px-4 py-10">
+      <header class="mb-8 rounded-2xl bg-white p-6 shadow">
+        <h1 class="text-3xl font-bold">KickPredict — Sandbox to Production Tracker</h1>
+        <p class="mt-2 text-slate-600">
+          Follow each section end-to-end with practical explanations and keep completion progress saved in
+          <code class="rounded bg-slate-100 px-1 py-0.5 text-slate-700">localStorage</code>.
+        </p>
+
+        <div class="mt-6 rounded-xl bg-slate-50 p-4">
+          <div class="mb-2 flex items-center justify-between text-sm font-medium">
+            <span>Overall Progress</span>
+            <span id="overallLabel">0 / 0 complete</span>
+          </div>
+          <div class="h-3 w-full overflow-hidden rounded-full bg-slate-200">
+            <div id="overallBar" class="h-full w-0 bg-emerald-500 transition-all duration-300"></div>
+          </div>
+        </div>
+
+        <div class="mt-4 flex flex-wrap gap-3">
+          <button id="expandAll" class="rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-900">Expand all</button>
+          <button id="collapseAll" class="rounded-lg bg-slate-600 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700">Collapse all</button>
+          <button id="resetProgress" class="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700">Reset progress</button>
+        </div>
+      </header>
+
+      <main id="tracker" class="space-y-5"></main>
+    </div>
+
+    <script>
+      const STORAGE_KEY = 'kickpredict_migration_tracker_v2';
+
+      const sections = [
+        {
+          title: '1. Current State Summary',
+          why: 'Before changing anything, confirm your baseline so you can verify every production migration change after each deployment.',
+          how: [
+            'Review each row in your summary table (Square, Apple Pay, Apple Sign-In, Firebase, Push, app naming, platform headers).',
+            'Mark where code currently points vs where production should point.',
+            'Use this snapshot as your rollback/reference document if a production test fails.'
+          ],
+          items: ['Confirm all current-state values are still accurate today.']
+        },
+        {
+          title: '2. Square Payments (Sandbox → Production)',
+          why: 'Mobile and backend must both use production Square credentials, otherwise token/nonce mismatch errors will break payments.',
+          how: [
+            'In Square Developer Dashboard, switch from Sandbox to Production and copy the production Application ID (sq0idp-*).',
+            'From Square Locations Dashboard, copy the production location ID.',
+            'Update only environment.prod.ts with production values; keep environment.ts sandbox for safe local testing.',
+            'Keep your index.html SDK split (localhost → sandbox script, deployed host → production script).',
+            'Coordinate with backend team to ensure production Access Token and location are used server-side too.'
+          ],
+          links: [
+            { label: 'Square Developer Apps', url: 'https://developer.squareup.com/apps' },
+            { label: 'Square Locations', url: 'https://squareup.com/dashboard/locations' }
+          ],
+          items: [
+            'Get production Square Application ID (sq0idp-*).',
+            'Get production Square Location ID.',
+            'Update src/environments/environment.prod.ts with production appId/locationId.',
+            'Remove legacy commented-out Square config from production env file.',
+            'Confirm backend uses production Access Token + Location ID.'
+          ]
+        },
+        {
+          title: '3. Apple Pay (Sandbox → Production)',
+          why: 'Apple Pay readiness depends on Merchant ID + certificate + app capability alignment; any missing piece causes runtime Apple Pay failures.',
+          how: [
+            'Verify Merchant ID exists in Apple Developer (merchant.kickpredict.iosapp.square).',
+            'In Square Apple Pay tab, generate CSR, issue cert in Apple portal, upload cert back to Square, and confirm status Active.',
+            'Confirm App ID capability includes Apple Pay and merchant association.',
+            'Regenerate distribution provisioning profile after capability changes so Release build includes correct entitlements.'
+          ],
+          links: [
+            { label: 'Apple Merchant IDs', url: 'https://developer.apple.com/account/resources/identifiers/list/merchant' },
+            { label: 'Square App Dashboard', url: 'https://developer.squareup.com/apps' }
+          ],
+          items: [
+            'Verify merchant.kickpredict.iosapp.square exists.',
+            'Verify Apple Pay cert status is Active in Square.',
+            'Verify App ID co.kickpredict.iosapp has Apple Pay capability enabled.',
+            'Regenerate/install distribution provisioning profile.'
+          ]
+        },
+        {
+          title: '4. Apple Sign-In',
+          why: 'iOS native and web Apple Sign-In use different identifiers; both must be configured or one platform flow will fail.',
+          how: [
+            'For native iOS, ensure Sign In with Apple capability is enabled on App ID co.kickpredict.iosapp.',
+            'For web flow, verify Service ID co.kickpredict.web.auth has correct primary app, domains, and return URLs.',
+            'Test both redirect endpoints in a browser to ensure they are reachable and handled by your app/backend.'
+          ],
+          links: [
+            { label: 'Apple App IDs', url: 'https://developer.apple.com/account/resources/identifiers/list' },
+            { label: 'Apple Service IDs', url: 'https://developer.apple.com/account/resources/identifiers/list/serviceId' }
+          ],
+          items: [
+            'Verify iOS App ID Sign In with Apple capability.',
+            'Verify web Service ID co.kickpredict.web.auth configuration.',
+            'Verify domains + return URLs include production endpoints.',
+            'Verify redirect endpoints are reachable and correctly handled.'
+          ]
+        },
+        {
+          title: '5. Firebase Configuration Mismatch',
+          why: 'Using two Firebase projects causes auth/push failures and inconsistent tokens. All app/web/iOS configs must target one project.',
+          how: [
+            'Choose one Firebase project (recommended: kickpredict-app, since most app configs already use it).',
+            'Update firebase-messaging-sw.js so messaging sender/project matches the chosen project.',
+            'Cross-check environment.ts, environment.prod.ts, and GoogleService-Info.plist for exact alignment.',
+            'Verify Firebase Auth providers, web VAPID key, and APNs key setup in Firebase Console.'
+          ],
+          links: [
+            { label: 'Firebase Console', url: 'https://console.firebase.google.com' },
+            { label: 'Apple APNs Keys', url: 'https://developer.apple.com/account/resources/authkeys/list' }
+          ],
+          items: [
+            'Select one Firebase project for all platforms.',
+            'Align firebase-messaging-sw.js with selected project.',
+            'Align all environment/plist config with selected project.',
+            'Verify Firebase Auth + Cloud Messaging setup.',
+            'Upload/verify APNs .p8 key in Firebase.'
+          ]
+        },
+        {
+          title: '6. iOS Push Notifications (APS Environment)',
+          why: 'Release builds must use production APNs environment; keeping development in release prevents production push delivery.',
+          how: [
+            'Set AppRelease.entitlements aps-environment to production.',
+            'Keep AppDebug.entitlements as development for local/device debug tests.',
+            'Double-check Xcode build settings map Debug/Release to correct entitlements files.'
+          ],
+          items: [
+            'Set ios/App/App/AppRelease.entitlements aps-environment = production.',
+            'Keep ios/App/App/AppDebug.entitlements aps-environment = development.',
+            'Verify Xcode Code Signing Entitlements mapping.'
+          ]
+        },
+        {
+          title: '7. App Name & Bundle ID Cleanup',
+          why: 'App name affects release branding; bundle ID must remain unchanged to keep same App Store identity.',
+          how: [
+            "Update capacitor.config.ts appName to final product name ('KickPredict').",
+            'Run npx cap sync ios to propagate updates into iOS project.',
+            'Confirm iOS Display Name in Xcode target settings if manual adjustment is needed.',
+            'Do not change bundle ID co.kickpredict.iosapp.'
+          ],
+          items: [
+            "Update appName from 'KickPredict iOS Demo' to 'KickPredict'.",
+            'Run npx cap sync ios.',
+            'Verify display name in Xcode.',
+            'Confirm bundle ID remains unchanged.'
+          ]
+        },
+        {
+          title: '8. Platform Header Fix',
+          why: 'A hardcoded Android platform header can break platform-specific backend behavior, analytics, and feature flags.',
+          how: [
+            'Replace hardcoded Platform header with runtime platform detection using Capacitor.getPlatform().',
+            'Add helper that maps ios → Ios enum, android → Android enum, else → Web enum.',
+            'Validate one request from web, iOS, and Android to ensure backend receives expected header values.'
+          ],
+          items: [
+            'Use this.getCurrentPlatform() in request header assignment.',
+            "Import Capacitor from '@capacitor/core'.",
+            'Add helper method mapping ios/android/web to enum values.'
+          ]
+        },
+        {
+          title: '9. Code Cleanup',
+          why: 'Removing dead/debug code lowers release risk and makes production issue triage easier.',
+          how: [
+            'Delete dead lifecycle/test methods from square-payment component.',
+            'Remove noisy debug logs (emoji/verbose logs) from auth/payment flows.',
+            'Remove stale commented URLs/config blocks to avoid confusion during future maintenance.'
+          ],
+          items: [
+            'Delete ionViewWillEnter2(), ionViewWillEnterOld(), and testPlugin().',
+            'Remove/reduce debug console logs in auth/payment services/components.',
+            'Remove commented ngrok line from wallet.service.ts.',
+            'Clean commented legacy values from environment.prod.ts.'
+          ]
+        },
+        {
+          title: '10. Final Build & Submission Checklist',
+          why: 'A strict preflight + archive workflow catches configuration mistakes before App Store review and avoids failed submissions.',
+          how: [
+            'Build Angular production bundle: ng build --configuration production.',
+            'Sync Capacitor iOS project: npx cap sync ios.',
+            'Open in Xcode, verify signing/capabilities/profiles, archive, and distribute to App Store Connect.',
+            'Post-upload, test TestFlight with real card, Apple Pay, push, and OAuth flows.'
+          ],
+          items: [
+            'Run ng build --configuration production.',
+            'Run npx cap sync ios.',
+            'Run npx cap open ios.',
+            'Archive and upload in Xcode/App Store Connect.',
+            'Validate end-to-end TestFlight production behavior.'
+          ]
+        }
+      ];
+
+      let state = {};
+
+      function loadState() {
+        try {
+          state = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {};
+        } catch {
+          state = {};
+        }
+      }
+
+      function saveState() {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      }
+
+      function updateProgress() {
+        const checkboxes = [...document.querySelectorAll('input[type="checkbox"]')];
+        const done = checkboxes.filter((box) => box.checked).length;
+        const total = checkboxes.length;
+        const percent = total ? Math.round((done / total) * 100) : 0;
+
+        document.getElementById('overallLabel').textContent = `${done} / ${total} complete (${percent}%)`;
+        document.getElementById('overallBar').style.width = `${percent}%`;
+      }
+
+      function createInfoBlock(section) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'space-y-3 rounded-xl bg-slate-50 p-4';
+
+        if (section.why) {
+          const why = document.createElement('p');
+          why.className = 'text-sm leading-6 text-slate-700';
+          why.innerHTML = `<span class="font-semibold text-slate-900">Why this matters:</span> ${section.why}`;
+          wrapper.appendChild(why);
+        }
+
+        if (section.how && section.how.length) {
+          const title = document.createElement('h4');
+          title.className = 'text-sm font-semibold text-slate-900';
+          title.textContent = 'How to do it';
+          wrapper.appendChild(title);
+
+          const list = document.createElement('ul');
+          list.className = 'list-disc space-y-1 pl-5 text-sm text-slate-700';
+          section.how.forEach((line) => {
+            const li = document.createElement('li');
+            li.textContent = line;
+            list.appendChild(li);
+          });
+          wrapper.appendChild(list);
+        }
+
+        if (section.links && section.links.length) {
+          const linksWrap = document.createElement('div');
+          linksWrap.className = 'flex flex-wrap gap-2 pt-1';
+
+          section.links.forEach((link) => {
+            const a = document.createElement('a');
+            a.href = link.url;
+            a.target = '_blank';
+            a.rel = 'noreferrer noopener';
+            a.className = 'rounded-md bg-white px-3 py-1.5 text-xs font-medium text-blue-700 ring-1 ring-blue-200 hover:bg-blue-50';
+            a.textContent = link.label;
+            linksWrap.appendChild(a);
+          });
+
+          wrapper.appendChild(linksWrap);
+        }
+
+        return wrapper;
+      }
+
+      function render() {
+        const root = document.getElementById('tracker');
+        root.innerHTML = '';
+
+        sections.forEach((section, sectionIndex) => {
+          const sectionId = `section-${sectionIndex}`;
+          const details = document.createElement('details');
+          details.className = 'overflow-hidden rounded-2xl bg-white shadow';
+          details.open = true;
+
+          const summary = document.createElement('summary');
+          summary.className = 'cursor-pointer list-none bg-slate-50 px-5 py-4 text-lg font-semibold';
+          summary.textContent = section.title;
+          details.appendChild(summary);
+
+          const content = document.createElement('div');
+          content.className = 'space-y-4 px-5 py-4';
+
+          content.appendChild(createInfoBlock(section));
+
+          const checklistTitle = document.createElement('h4');
+          checklistTitle.className = 'text-sm font-semibold uppercase tracking-wide text-slate-500';
+          checklistTitle.textContent = 'Checklist';
+          content.appendChild(checklistTitle);
+
+          section.items.forEach((item, itemIndex) => {
+            const itemId = `${sectionId}-item-${itemIndex}`;
+
+            const label = document.createElement('label');
+            label.className = 'flex items-start gap-3 rounded-lg border border-slate-200 p-3 hover:bg-slate-50';
+
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'mt-1 h-4 w-4 accent-emerald-600';
+            checkbox.checked = Boolean(state[itemId]);
+            checkbox.addEventListener('change', () => {
+              state[itemId] = checkbox.checked;
+              saveState();
+              updateProgress();
+            });
+
+            const text = document.createElement('span');
+            text.textContent = item;
+
+            label.appendChild(checkbox);
+            label.appendChild(text);
+            content.appendChild(label);
+          });
+
+          details.appendChild(content);
+          root.appendChild(details);
+        });
+
+        updateProgress();
+      }
+
+      function setAllSections(open) {
+        document.querySelectorAll('details').forEach((details) => {
+          details.open = open;
+        });
+      }
+
+      document.getElementById('expandAll').addEventListener('click', () => setAllSections(true));
+      document.getElementById('collapseAll').addEventListener('click', () => setAllSections(false));
+
+      document.getElementById('resetProgress').addEventListener('click', () => {
+        const confirmed = confirm('Reset all saved progress?');
+        if (!confirmed) return;
+        state = {};
+        saveState();
+        render();
+      });
+
+      loadState();
+      render();
+    </script>
+  </body>
+</html>
